@@ -7,7 +7,7 @@ import tornado.escape
 
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from netCDF4 import Dataset
 
@@ -25,10 +25,13 @@ from mpl_toolkits.basemap import Basemap
 from PIL import Image, ImageDraw
 import shapefile
 
-TEST_NC_FILE = ('/share/data/gwrf/fc_northsea/netcdf/gwrf2016050900/'
-                'wrf.ns.24km.2016050900.100.nc')
+from mappy.WMS import get_capabilities
+
+TEST_NC_FILE = ''
 
 TEST_VAR = 'mean_sea_level_pressure'
+
+TEST_SHAPEFILE = ''
 
 class Server(object):
     def __init__(self):
@@ -70,11 +73,22 @@ def crop_data(data, bbox, shapes):
     img = Image.new("RGB", (iwidth, iheight), "white")
     draw = ImageDraw.Draw(img)
 
+    proj_from = pyproj.Proj('+init=EPSG:4326')
+    proj_to = pyproj.Proj('+init=EPSG:3857')
+
     for shape in shapes:
-        if not bboxes_intersect(shape.bbox, bbox):
+        slon = [shape.bbox[0], shape.bbox[2]]
+        slat = [shape.bbox[1], shape.bbox[3]]
+
+        rlon, rlat = pyproj.transform(proj_from, proj_to, slon, slat)
+        r_bbox = [rlon[0], rlat[0], rlon[1], rlat[1]]
+
+        if not bboxes_intersect(r_bbox, bbox):
             continue
+
         pixels = []
         for x,y in shape.points:
+            x, y = pyproj.transform(proj_from, proj_to, x, y)
 
             px = int(iwidth - ((bbox[2] - x) * xratio))
             py = int((bbox[3] - y) * yratio)
@@ -87,23 +101,26 @@ def crop_data(data, bbox, shapes):
     print "mdata size: {}".format(np.shape(mdata))
     print mdata
 
-    data[np.flipud(mdata)<10] = np.nan
+    data[np.flipud(mdata)>10] = np.nan
     return data
 
-def test_plot_1(ax, data, layer, bbox):
+def test_plot_1(ax, data, layer, bbox, wgs84_bbox):
 
-#    if layer.crop or layer.crop_inverse:
-#        if not layer.shapes:
-#            layer.set_shapes()
-#
-#        data = crop_data(data, bbox, layer.shapes)
+    if layer.crop or layer.crop_inverse:
+        if not layer.shapes:
+            layer.set_shapes()
 
-     ax.imshow(data, origin='lower', aspect='auto',interpolation='nearest') 
+        data = crop_data(data, bbox, layer.shapes)
+    
+
+    ax.imshow(data, origin='lower', aspect='auto',interpolation='nearest') 
     #ax.contourf(data/100, levels=np.arange(920, 1030, 4))
+    #ax.contour(data/100, levels=np.arange(920, 1030, 4), linewidths=.5,
+    #            colors='k')
 
 class Layer(object):
     def __init__(self, data_file_glob=None, crop=False, crop_inverse=False,
-                    crop_file=None, colormap=None, refine_data=4,
+                    crop_file=None, colormap=None, refine_data=0,
                     gshhs_resolution=None, var_name=None, 
                     native_projection=None):
 
@@ -119,6 +136,8 @@ class Layer(object):
         self.native_projection = pyproj.Proj('+init=EPSG:4326')
         self.shapes = []
 
+        self.bbox = [-20.358, 39.419, 35.509, 64.749]
+
         if crop and crop_inverse:
             raise ValueError('crop and crop_inverse cannot both be True')
 
@@ -130,11 +149,12 @@ class Layer(object):
 
         bbox = [lon[0], lat[0], lon[-1], lat[-1]]
 
-        r = shapefile.Reader('C:\Users\Dave\gshhg\GSHHS_shp\l\GSHHS_l_L1')
+        r = shapefile.Reader(TEST_SHAPEFILE)
         for shape in r.shapes():
             if not(bboxes_intersect(shape.bbox, bbox)):
                 continue
             self.shapes.append(shape)
+            print shape
 
         print "In-memory caching of shapefiles for layer..."
         print "Size: {}".format(sys.getsizeof(self.shapes))
@@ -142,7 +162,7 @@ class Layer(object):
 
 
 test_layer = Layer(data_file_glob=TEST_NC_FILE, 
-                   crop=False, refine_data=8, gshhs_resolution='i',
+                   crop=False, refine_data=0, gshhs_resolution='i',
                    var_name=TEST_VAR)
 
 layers = [test_layer]
@@ -167,16 +187,13 @@ def refine_data(lon, lat, f, refine):
     f = ipol(lon_hi, lat_hi)
     print 'done'
 
-    return f
+    return lon_hi, lat_hi, f
 
 def reproject(lon, lat, data, native, requested):
     b_lon = lon
     b_lat = lat
     w = data
 
-    print 'b_lon = {}..{}'.format(b_lon.min(), b_lon.max())
-    print 'b_lat = {}..{}'.format(b_lat.min(), b_lat.max())
-    print '-'*50
 
     b_lon, b_lat = np.meshgrid(b_lon, b_lat)
     p_lon, p_lat = pyproj.transform(native, requested, b_lon, b_lat)
@@ -185,27 +202,17 @@ def reproject(lon, lat, data, native, requested):
     p_lon = p_lon[0, :]
     p_lat = p_lat[:, 0]
 
-    print 'p_lon = {}..{}'.format(p_lon.min(), p_lon.max())
-    print 'p_lat = {}..{}'.format(p_lat.min(), p_lat.max())
-    print '-'*50
 
     b_lat = (b_lat - b_lat.min()) / ((b_lat - b_lat.min()).max())
     b_lon = (b_lon - b_lon.min()) / ((b_lon - b_lon.min()).max())
 
-    print 'scaled b_lon = {}..{}'.format(b_lon.min(), b_lon.max())
-    print 'scaled b_lat = {}..{}'.format(b_lat.min(), b_lat.max())
-    print '-'*50
 
-    p_lat = (p_lat - p_lat.min()) / ((p_lat - p_lat.min()).max())
-    p_lon = (p_lon - p_lon.min()) / ((p_lon - p_lon.min()).max())
+    p_lat_s = (p_lat - p_lat.min()) / ((p_lat - p_lat.min()).max())
+    p_lon_s = (p_lon - p_lon.min()) / ((p_lon - p_lon.min()).max())
 
-    print 'scaled p_lon = {}..{}'.format(p_lon.min(), p_lon.max())
-    print 'scaled p_lat = {}..{}'.format(p_lat.min(), p_lat.max())
-    print '-'*50
 
-    #b_lon, b_lat = np.meshgrid(b_lon, b_lat)
     i2d = interp2d(b_lon, b_lat, w)
-    w = i2d(p_lon, p_lat)
+    w = i2d(p_lon_s, p_lat_s)
 
     return p_lon, p_lat, w
 
@@ -216,6 +223,7 @@ def crop_to_bbox(lon, lat, data, bbox, nx=None, ny=None):
     if not ny:
         ny = len(lat)
 
+    
     # Interpolate onto the bounding box
     b_lon_min = bbox[0]
     b_lat_min = bbox[1]
@@ -224,7 +232,15 @@ def crop_to_bbox(lon, lat, data, bbox, nx=None, ny=None):
 
     b_lon = np.linspace(b_lon_min, b_lon_max, num=nx)
     b_lat = np.linspace(b_lat_min, b_lat_max, num=ny)
-    i2d = interp2d(lon, lat, data)
+
+    print '-'*50
+    print "lon_range = {} .. {}".format(lon.min(), lon.max())
+    print "lat_range = {} .. {}".format(lat.min(), lat.max())
+    print '-'*50
+    print "b_lon_range = {} .. {}".format(b_lon.min(), b_lon.max())
+    print "b_lat_range = {} .. {}".format(b_lat.min(), b_lat.max())
+    print '-'*50
+    i2d = interp2d(lon, lat, data, fill_value=np.nan)
 
     return b_lon, b_lat, i2d(b_lon, b_lat)
 
@@ -246,6 +262,14 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
     lon, lat = np.meshgrid(lon,lat)
     wgs84 = pyproj.Proj('+init=EPSG:4326')
 
+    wgs84_bbox_lon, wgs_bbox_lat = pyproj.transform(proj_to, wgs84, 
+                                    [bbox[0], bbox[2]], [bbox[1], bbox[3]])
+
+    wgs84_bbox = [wgs84_bbox_lon[0], wgs_bbox_lat[0],
+                  wgs84_bbox_lon[1], wgs_bbox_lat[1]]
+
+    print "Reprojecting from {} to {}".format('EPSG:4326', crs)
+
     mask = np.zeros_like(w)
     mask[~np.isnan(w)] = 1
     w[np.isnan(w)] = np.nanmean(w)
@@ -259,13 +283,14 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
     # Reproject to requested CRS
     p_lon, p_lat, w = reproject(lon, lat, w, wgs84, proj_to)
 
-    # Project onto the bounding box
-    b_lon, b_lat, w = crop_to_bbox(lon=lon, lat=lat, data=w, bbox=bbox)
-
     # Supersample the data, if requested
     if layer.refine_data:
-         w = refine_data(b_lon, b_lat, w, layer.refine_data)
+         p_lon, p_lat, w = refine_data(p_lon, p_lat, w, layer.refine_data)
 
+    # Project onto the bounding box
+    b_lon, b_lat, w = crop_to_bbox(lon=p_lon, lat=p_lat, data=w, bbox=bbox)
+
+    
     # Build the figure
     fig = plt.figure(frameon=False)
     fig.set_size_inches(width/100, height/100)
@@ -274,7 +299,7 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
     fig.add_axes(ax)
 
     print "Rendering image..."
-    layer.render_fn(ax=ax, data=w, bbox=bbox, layer=layer)
+    layer.render_fn(ax=ax, data=w, bbox=bbox, layer=layer, wgs84_bbox=wgs84_bbox)
     print "   ...done"
 
     memdata = io.BytesIO()
@@ -289,11 +314,6 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
 def nan_helper(y):
 	return np.isnan(y), lambda z: z.nonzero()[0]
 
-def get_capabilities():
-    with open('capabilities.xml', 'r') as f:
-	   return f.read()
-
-
 class MainHandler(tornado.web.RequestHandler):
     def get(self):
 
@@ -302,7 +322,7 @@ class MainHandler(tornado.web.RequestHandler):
 
         request = self.get_argument('REQUEST')
         if request == 'GetCapabilities':
-            capes = get_capabilities()
+            capes = get_capabilities(layers)
             self.set_header('Content-type', 'text/xml')
             self.write(capes)
             return
