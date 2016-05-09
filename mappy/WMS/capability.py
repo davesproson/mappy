@@ -55,7 +55,7 @@ def get_capabilities(layers):
     get = ET.SubElement(http, 'Get')
     ET.SubElement(get, 'OnlineResource', **{
                     'xlink:type': 'simple', 
-                    'xlink:href': 'http://fgwfcluster3:8888/?SERVICE=WMS&'})
+                    'xlink:href': 'http://localhost:8888/?SERVICE=WMS&'})
 
 
 
@@ -66,7 +66,7 @@ def get_capabilities(layers):
     get = ET.SubElement(http, 'Get')
     ET.SubElement(get, 'OnlineResource', **{
                     'xlink:type': 'simple', 
-                    'xlink:href': 'http://fgwfcluster3:8888/?SERVICE=WMS&'})
+                    'xlink:href': 'http://localhost:8888/?SERVICE=WMS&'})
 
 
 #    get_feature_info = ET.SubElement(request, 'GetFeatureInfo')
@@ -82,16 +82,16 @@ def get_capabilities(layers):
     for p in valid_projections:
         ET.SubElement(root_layer, 'CRS').text = p
 
-    bbox = ET.SubElement(root_layer, 'EX_GeographicBoundingBox')
-    ET.SubElement(bbox, 'westBoundLongitude').text = '-180'
-    ET.SubElement(bbox, 'eastBoundLongitude').text = '180'
-    ET.SubElement(bbox, 'southBoundLatitude').text = '-90'
-    ET.SubElement(bbox, 'northBoundLatitude').text = '90'
-    
-    ET.SubElement(root_layer, 'BoundingBox',
-            CRS='CRS:84', 
-            minx='-180', miny='-90',
-            maxx='180', maxy='90')
+#    bbox = ET.SubElement(root_layer, 'EX_GeographicBoundingBox')
+#    ET.SubElement(bbox, 'westBoundLongitude').text = '-180'
+#    ET.SubElement(bbox, 'eastBoundLongitude').text = '180'
+#    ET.SubElement(bbox, 'southBoundLatitude').text = '-90'
+#    ET.SubElement(bbox, 'northBoundLatitude').text = '90'
+#    
+#    ET.SubElement(root_layer, 'BoundingBox',
+#            CRS='EPSG:4326', 
+#            minx='-180', miny='-90',
+#            maxx='180', maxy='90')
 
     for _layer in layers:
         layer = ET.SubElement(root_layer, 'Layer')
@@ -112,7 +112,7 @@ def get_capabilities(layers):
         ET.SubElement(bbox, 'northBoundLatitude').text = '{}'.format(_layer.bbox[3])
 
         ET.SubElement(layer, 'BoundingBox',
-                   CRS='CRS:84', 
+                   CRS='EPSG:4326', 
                    minx='{}'.format(_layer.bbox[0]), 
                    miny='{}'.format(_layer.bbox[1]),
                    maxx='{}'.format(_layer.bbox[2]), 

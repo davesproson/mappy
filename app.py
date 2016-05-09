@@ -7,7 +7,7 @@ import tornado.escape
 
 import numpy as np
 import matplotlib
-#matplotlib.use('Agg')
+matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from netCDF4 import Dataset
 
@@ -36,15 +36,15 @@ TEST_SHAPEFILE = ''
 class Server(object):
     def __init__(self):
         self.contact_person = 'Dave Sproson'
-        self.contact_organization = 'Fugro GEOS'
-        self.contact_position = 'Principal MetOcean Modeller'
-        self.address = 'Fugro House, Hitercroft Road'
-        self.city = 'Wallingford'
-        self.state_or_province = 'Oxfordshire'
-        self.postcode = 'OX10 9RB'
+        self.contact_organization = 'A Company'
+        self.contact_position = 'A job title'
+        self.address = 'Street Address'
+        self.city = 'Anyton'
+        self.state_or_province = 'Someshire'
+        self.postcode = 'AB12 1AB'
         self.country = 'UK'
-        self.contact_voice_telephone = '07920201045'
-        self.contact_electronic_mail_address = 'D.Sproson@fugro.com'
+        self.contact_voice_telephone = '0123456789'
+        self.contact_electronic_mail_address = 'My@Email.com'
         self.fees = 'None'
         self.access_constraints = 'Commercial and Restricted'
 
@@ -230,6 +230,7 @@ def crop_to_bbox(lon, lat, data, bbox, nx=None, ny=None):
     b_lon_max = bbox[2]
     b_lat_max = bbox[3]
 
+
     b_lon = np.linspace(b_lon_min, b_lon_max, num=nx)
     b_lat = np.linspace(b_lat_min, b_lat_max, num=ny)
 
@@ -251,13 +252,11 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
 
     proj_to = pyproj.Proj('+init={}'.format(crs))
 
-    print "Reading data..."
     nc = Dataset(layer.data_file_glob, 'r')
     w = np.squeeze(nc[layer.var_name][0, :, :])
     lon = np.squeeze(nc['longitude'][:])
     lat = np.squeeze(nc['latitude'][:])
     nc.close()
-    print "   ...done"
 
     lon, lat = np.meshgrid(lon,lat)
     wgs84 = pyproj.Proj('+init=EPSG:4326')
@@ -265,10 +264,11 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
     wgs84_bbox_lon, wgs_bbox_lat = pyproj.transform(proj_to, wgs84, 
                                     [bbox[0], bbox[2]], [bbox[1], bbox[3]])
 
+
     wgs84_bbox = [wgs84_bbox_lon[0], wgs_bbox_lat[0],
                   wgs84_bbox_lon[1], wgs_bbox_lat[1]]
 
-    print "Reprojecting from {} to {}".format('EPSG:4326', crs)
+    
 
     mask = np.zeros_like(w)
     mask[~np.isnan(w)] = 1
@@ -281,14 +281,20 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
     ny = len(lat)
 
     # Reproject to requested CRS
-    p_lon, p_lat, w = reproject(lon, lat, w, wgs84, proj_to)
+    if not crs == 'EPSG:4326':
+        p_lon, p_lat, w = reproject(lon, lat, w, wgs84, proj_to)
+        print "Reprojecting from {} to {}".format('EPSG:4326', crs)
+    else:
+        p_lon, p_lat = lon, lat
 
     # Supersample the data, if requested
     if layer.refine_data:
          p_lon, p_lat, w = refine_data(p_lon, p_lat, w, layer.refine_data)
+         
 
     # Project onto the bounding box
     b_lon, b_lat, w = crop_to_bbox(lon=p_lon, lat=p_lat, data=w, bbox=bbox)
+
 
     
     # Build the figure
@@ -307,6 +313,8 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
     image = memdata.getvalue()
 
     print "request complete"
+    
+
     return image
 
 
