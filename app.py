@@ -11,6 +11,7 @@ matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from netCDF4 import Dataset
 
+import datetime
 import io
 import os
 import pyproj
@@ -23,6 +24,11 @@ from mpl_toolkits.basemap import Basemap
 
 from PIL import Image, ImageDraw
 import shapefile
+
+TEST_NC_FILE = ('/share/data/gwrf/fc_northsea/netcdf/gwrf2016050900/'
+                'wrf.ns.24km.2016050900.100.nc')
+
+TEST_VAR = 'mean_sea_level_pressure'
 
 class Server(object):
     def __init__(self):
@@ -86,14 +92,14 @@ def crop_data(data, bbox, shapes):
 
 def test_plot_1(ax, data, layer, bbox):
 
-    if layer.crop or layer.crop_inverse:
-        if not layer.shapes:
-            layer.set_shapes()
+#    if layer.crop or layer.crop_inverse:
+#        if not layer.shapes:
+#            layer.set_shapes()
+#
+#        data = crop_data(data, bbox, layer.shapes)
 
-        data = crop_data(data, bbox, layer.shapes)
-
-    # ax.imshow(data, origin='lower', aspect='auto',interpolation='nearest') 
-    ax.contourf(data/100, levels=np.arange(920, 1030, 4))
+     ax.imshow(data, origin='lower', aspect='auto',interpolation='nearest') 
+    #ax.contourf(data/100, levels=np.arange(920, 1030, 4))
 
 class Layer(object):
     def __init__(self, data_file_glob=None, crop=False, crop_inverse=False,
@@ -135,9 +141,9 @@ class Layer(object):
 
 
 
-test_layer = Layer(data_file_glob='c:\Users\dave\python\wrf.ns.24km.2016050700.100.nc', 
-                   crop=True, refine_data=8, gshhs_resolution='i',
-                   var_name='mean_sea_level_pressure')
+test_layer = Layer(data_file_glob=TEST_NC_FILE, 
+                   crop=False, refine_data=8, gshhs_resolution='i',
+                   var_name=TEST_VAR)
 
 layers = [test_layer]
 
@@ -201,7 +207,29 @@ def reproject(lon, lat, data, native, requested):
     i2d = interp2d(b_lon, b_lat, w)
     w = i2d(p_lon, p_lat)
 
-    return w
+    return p_lon, p_lat, w
+
+def crop_to_bbox(lon, lat, data, bbox, nx=None, ny=None):
+
+    if not nx:
+        nx = len(lon)
+    if not ny:
+        ny = len(lat)
+
+    # Interpolate onto the bounding box
+    b_lon_min = bbox[0]
+    b_lat_min = bbox[1]
+    b_lon_max = bbox[2]
+    b_lat_max = bbox[3]
+
+    b_lon = np.linspace(b_lon_min, b_lon_max, num=nx)
+    b_lat = np.linspace(b_lat_min, b_lat_max, num=ny)
+    i2d = interp2d(lon, lat, data)
+
+    return b_lon, b_lat, i2d(b_lon, b_lat)
+
+
+
 
 def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
 
@@ -217,12 +245,7 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
 
     lon, lat = np.meshgrid(lon,lat)
     wgs84 = pyproj.Proj('+init=EPSG:4326')
-    # p_lon, p_lat = pyproj.transform(wgs84, proj_to, lon, lat)
 
-
-
-    #nans, x = nan_helper(w)
-    #w[nans] = np.interp(x(nans), x(~nans), w[~nans])
     mask = np.zeros_like(w)
     mask[~np.isnan(w)] = 1
     w[np.isnan(w)] = np.nanmean(w)
@@ -230,30 +253,25 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
     lon = lon[0, :]
     lat = lat[:, 0]
 
-    b_lon_min = bbox[0]
-    b_lat_min = bbox[1]
-    b_lon_max = bbox[2]
-    b_lat_max = bbox[3]
-
     nx = len(lon)
     ny = len(lat)
 
-    #Interpolate onto bounding box
-    b_lon = np.linspace(b_lon_min, b_lon_max, num=nx)
-    b_lat = np.linspace(b_lat_min, b_lat_max, num=ny)
-    i2d = interp2d(lon, lat, w)
-    w = i2d(b_lon, b_lat)
+    # Reproject to requested CRS
+    p_lon, p_lat, w = reproject(lon, lat, w, wgs84, proj_to)
 
-    w = reproject(b_lon, b_lat, w, wgs84, proj_to)
-    
+    # Project onto the bounding box
+    b_lon, b_lat, w = crop_to_bbox(lon=lon, lat=lat, data=w, bbox=bbox)
+
+    # Supersample the data, if requested
+    if layer.refine_data:
+         w = refine_data(b_lon, b_lat, w, layer.refine_data)
+
+    # Build the figure
     fig = plt.figure(frameon=False)
     fig.set_size_inches(width/100, height/100)
     ax = plt.Axes(fig, [0., 0., 1., 1.])
     ax.set_axis_off()
     fig.add_axes(ax)
-
-    if layer.refine_data:
-         w = refine_data(b_lon, b_lat, w, layer.refine_data)
 
     print "Rendering image..."
     layer.render_fn(ax=ax, data=w, bbox=bbox, layer=layer)
@@ -279,7 +297,7 @@ def get_capabilities():
 class MainHandler(tornado.web.RequestHandler):
     def get(self):
 
-
+        s = datetime.datetime.utcnow()
         print self.request.uri
 
         request = self.get_argument('REQUEST')
@@ -300,6 +318,7 @@ class MainHandler(tornado.web.RequestHandler):
 
             self.set_header('Content-type', 'image/png')
             self.write(image)
+            print (datetime.datetime.utcnow() - s).total_seconds()
 
             
             
