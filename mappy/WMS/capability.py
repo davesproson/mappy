@@ -1,4 +1,5 @@
 import xml.etree.ElementTree as ET
+import socket
 
 __all__ = ['get_capabilities']
 
@@ -55,7 +56,7 @@ def get_capabilities(layers):
     get = ET.SubElement(http, 'Get')
     ET.SubElement(get, 'OnlineResource', **{
                     'xlink:type': 'simple', 
-                    'xlink:href': 'http://fgwfcluster3:8888/wms'})
+                    'xlink:href': 'http://{}:8888/wms'.format(socket.getfqdn())})
 
 
 
@@ -66,7 +67,7 @@ def get_capabilities(layers):
     get = ET.SubElement(http, 'Get')
     ET.SubElement(get, 'OnlineResource', **{
                     'xlink:type': 'simple', 
-                    'xlink:href': 'http://fgwfcluster3:8888/wms'})
+                    'xlink:href': 'http://{}:8888/wms'.format(socket.getfqdn())})
 
 
 #    get_feature_info = ET.SubElement(request, 'GetFeatureInfo')
