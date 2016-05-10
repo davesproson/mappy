@@ -26,6 +26,8 @@ from PIL import Image, ImageDraw
 import shapefile
 
 from mappy.WMS import get_capabilities
+from mappy.WMS import WMSGetMapRequest
+from mappy.WMS.style import StyleReader
 
 TEST_NC_FILE = ''
 
@@ -47,6 +49,8 @@ class Server(object):
         self.contact_electronic_mail_address = 'My@Email.com'
         self.fees = 'None'
         self.access_constraints = 'Commercial and Restricted'
+
+styles = StyleReader('styles.ini').styles
 
 def PIL2np(img):
         return np.array(img.getdata(),
@@ -101,7 +105,7 @@ def crop_data(data, bbox, shapes):
     print "mdata size: {}".format(np.shape(mdata))
     print mdata
 
-    data[np.flipud(mdata)>10] = np.nan
+    data[np.flipud(mdata)<10] = np.nan
     return data
 
 def test_plot_1(ax, data, layer, bbox, wgs84_bbox):
@@ -112,17 +116,15 @@ def test_plot_1(ax, data, layer, bbox, wgs84_bbox):
 
         data = crop_data(data, bbox, layer.shapes)
     
+    render_fn = getattr(plt, layer.style.render_function)
 
-    ax.imshow(data, origin='lower', aspect='auto',interpolation='nearest') 
-    #ax.contourf(data/100, levels=np.arange(920, 1030, 4))
-    #ax.contour(data/100, levels=np.arange(920, 1030, 4), linewidths=.5,
-    #            colors='k')
+    render_fn(data, **layer.style.render_args) 
 
 class Layer(object):
     def __init__(self, data_file_glob=None, crop=False, crop_inverse=False,
                     crop_file=None, colormap=None, refine_data=0,
                     gshhs_resolution=None, var_name=None, 
-                    native_projection=None):
+                    native_projection=None, style=None):
 
         self.data_file_glob = data_file_glob
         self.crop = crop
@@ -135,6 +137,7 @@ class Layer(object):
         self.render_fn = test_plot_1
         self.native_projection = pyproj.Proj('+init=EPSG:4326')
         self.shapes = []
+        self.style = style
 
         self.bbox = [-20.358, 39.419, 35.509, 64.749]
 
@@ -163,7 +166,7 @@ class Layer(object):
 
 test_layer = Layer(data_file_glob=TEST_NC_FILE, 
                    crop=False, refine_data=0, gshhs_resolution='i',
-                   var_name=TEST_VAR)
+                   var_name=TEST_VAR, style=styles[0])
 
 layers = [test_layer]
 
@@ -247,7 +250,7 @@ def crop_to_bbox(lon, lat, data, bbox, nx=None, ny=None):
 
 
 
-
+@tornado.gen.coroutine
 def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
 
     proj_to = pyproj.Proj('+init={}'.format(crs))
@@ -304,8 +307,24 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
     ax.set_axis_off()
     fig.add_axes(ax)
 
-    print "Rendering image..."
-    layer.render_fn(ax=ax, data=w, bbox=bbox, layer=layer, wgs84_bbox=wgs84_bbox)
+    if layer.crop or layer.crop_inverse:
+        print "cropping image..."
+        if not layer.shapes:
+            layer.set_shapes()
+        w = crop_data(w, bbox, layer.shapes)
+
+    # Render the data
+    print "rendering"
+    function_args = {}
+    for key, value in layer.style.render_args.iteritems():
+        if 'fn:' in value:
+            fn = ''.join(value.split(':')[1:])
+            value = eval(fn)
+        function_args.update({key: value})
+
+    print function_args
+    getattr(plt, layer.style.render_function)(
+        w, **function_args) 
     print "   ...done"
 
     memdata = io.BytesIO()
@@ -315,48 +334,49 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
     print "request complete"
     
 
-    return image
-
+    raise tornado.gen.Return(image)
 
 
 def nan_helper(y):
 	return np.isnan(y), lambda z: z.nonzero()[0]
 
 class MainHandler(tornado.web.RequestHandler):
+
+    @tornado.gen.coroutine
     def get(self):
 
         s = datetime.datetime.utcnow()
-        print self.request.uri
+        
+        print self.request.query_arguments
 
-        request = self.get_argument('REQUEST')
+        try:
+            request = self.get_argument('REQUEST')
+        except:
+            request = self.get_argument('request')
+
         if request == 'GetCapabilities':
             capes = get_capabilities(layers)
             self.set_header('Content-type', 'text/xml')
             self.write(capes)
             return
 
-        if request == 'GetMap':        
-            bbox = [float(i) for i in self.get_argument('BBOX').split(',')]
-            print 'bbox = {}'.format(bbox)
-            width = int(self.get_argument('WIDTH', default=100))
-            height = int(self.get_argument('HEIGHT', default=100))
-            crs = tornado.escape.url_unescape(self.get_argument('CRS', default='EPSG:4326'))
+        if request == 'GetMap':
+            map_request = WMSGetMapRequest(**self.request.query_arguments)
 
-            image = render(test_layer, bbox=bbox, width=width, height=height, crs=crs)
+            image = yield render(test_layer, 
+                             bbox=map_request.bbox, 
+                               width=map_request.width,
+                               height=map_request.height, 
+                               crs=map_request.crs)
 
             self.set_header('Content-type', 'image/png')
             self.write(image)
             print (datetime.datetime.utcnow() - s).total_seconds()
 
-            
-            
-
-
-
 
 def make_app():
     return tornado.web.Application([
-        (r'/', MainHandler),
+        (r'/wms', MainHandler),
         (r'', MainHandler),
     ])
 

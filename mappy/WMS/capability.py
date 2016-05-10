@@ -55,7 +55,7 @@ def get_capabilities(layers):
     get = ET.SubElement(http, 'Get')
     ET.SubElement(get, 'OnlineResource', **{
                     'xlink:type': 'simple', 
-                    'xlink:href': 'http://localhost:8888/?SERVICE=WMS&'})
+                    'xlink:href': 'http://fgwfcluster3:8888/wms'})
 
 
 
@@ -66,7 +66,7 @@ def get_capabilities(layers):
     get = ET.SubElement(http, 'Get')
     ET.SubElement(get, 'OnlineResource', **{
                     'xlink:type': 'simple', 
-                    'xlink:href': 'http://localhost:8888/?SERVICE=WMS&'})
+                    'xlink:href': 'http://fgwfcluster3:8888/wms'})
 
 
 #    get_feature_info = ET.SubElement(request, 'GetFeatureInfo')
