@@ -24,6 +24,7 @@ from mpl_toolkits.basemap import Basemap
 
 from PIL import Image, ImageDraw
 import shapefile
+#import osgeo
 
 from mappy.WMS import get_capabilities
 from mappy.WMS import WMSGetMapRequest
@@ -66,6 +67,8 @@ def crop_data(data, bbox, shapes):
     xdist = bbox[2] - bbox[0]
     ydist = bbox[3] - bbox[1]
 
+    print xdist, ydist
+
     # Image width & height
     iwidth = np.shape(data)[1]
     iheight = np.shape(data)[0]
@@ -77,14 +80,11 @@ def crop_data(data, bbox, shapes):
     img = Image.new("RGB", (iwidth, iheight), "white")
     draw = ImageDraw.Draw(img)
 
-    proj_from = pyproj.Proj('+init=EPSG:4326')
-    proj_to = pyproj.Proj('+init=EPSG:3857')
-
     for shape in shapes:
         slon = [shape.bbox[0], shape.bbox[2]]
         slat = [shape.bbox[1], shape.bbox[3]]
 
-        rlon, rlat = pyproj.transform(proj_from, proj_to, slon, slat)
+        rlon, rlat = slon, slat 
         r_bbox = [rlon[0], rlat[0], rlon[1], rlat[1]]
 
         if not bboxes_intersect(r_bbox, bbox):
@@ -92,33 +92,17 @@ def crop_data(data, bbox, shapes):
 
         pixels = []
         for x,y in shape.points:
-            x, y = pyproj.transform(proj_from, proj_to, x, y)
-
             px = int(iwidth - ((bbox[2] - x) * xratio))
             py = int((bbox[3] - y) * yratio)
             pixels.append((px,py))
 
         draw.polygon(pixels, outline="rgb(0,0,0)", fill="rgb(0,0,0)")
 
-    mdata = np.mean(PIL2np(img), axis=2)
+    mdata = np.flipud(np.mean(PIL2np(img), axis=2).astype(int))
 
-    print "mdata size: {}".format(np.shape(mdata))
-    print mdata
-
-    data[np.flipud(mdata)<10] = np.nan
+    data = np.ma.masked_where(np.logical_or(mdata>0, np.isnan(data)), data)
     return data
 
-def test_plot_1(ax, data, layer, bbox, wgs84_bbox):
-
-    if layer.crop or layer.crop_inverse:
-        if not layer.shapes:
-            layer.set_shapes()
-
-        data = crop_data(data, bbox, layer.shapes)
-    
-    render_fn = getattr(plt, layer.style.render_function)
-
-    render_fn(data, **layer.style.render_args) 
 
 class Layer(object):
     def __init__(self, data_file_glob=None, crop=False, crop_inverse=False,
@@ -134,7 +118,6 @@ class Layer(object):
         self.colormap = colormap
         self.refine_data = refine_data
         self.gshhs_resolution = gshhs_resolution
-        self.render_fn = test_plot_1
         self.native_projection = pyproj.Proj('+init=EPSG:4326')
         self.shapes = []
         self.style = style
@@ -157,7 +140,6 @@ class Layer(object):
             if not(bboxes_intersect(shape.bbox, bbox)):
                 continue
             self.shapes.append(shape)
-            print shape
 
         print "In-memory caching of shapefiles for layer..."
         print "Size: {}".format(sys.getsizeof(self.shapes))
@@ -171,6 +153,9 @@ test_layer = Layer(data_file_glob=TEST_NC_FILE,
 layers = [test_layer]
 
 def refine_data(lon, lat, f, refine):
+    lon = lon[0, :]
+    lat = lat[:, 0]
+
     dlon = lon[1] - lon[0]
     dlat = lat[1] - lat[0]
 
@@ -180,16 +165,18 @@ def refine_data(lon, lat, f, refine):
     nx = len(lon_hi)
     ny = len(lat_hi)
 
-    print 'meshing'
-    lon, lat = np.meshgrid(lon, lat)
-    print 'done'
+    a = np.array(f.mask).astype(int)
 
-    print 'interpolate'
-    ipol = interp2d(lon[0, :], lat[:, 0], f)
-    print 'built'
+    f[np.isnan(f)] = 100000
+
+    ipol = interp2d(lon, lat, f)
+    apol = interp2d(lon, lat, a)
     f = ipol(lon_hi, lat_hi)
-    print 'done'
+    a = apol(lon_hi, lat_hi)
+    f = np.ma.masked_where(a>.2, f)
 
+
+    lon_hi, lat_hi = np.meshgrid(lon_hi, lat_hi)
     return lon_hi, lat_hi, f
 
 def reproject(lon, lat, data, native, requested):
@@ -221,33 +208,7 @@ def reproject(lon, lat, data, native, requested):
 
 def crop_to_bbox(lon, lat, data, bbox, nx=None, ny=None):
 
-    if not nx:
-        nx = len(lon)
-    if not ny:
-        ny = len(lat)
-
-    
-    # Interpolate onto the bounding box
-    b_lon_min = bbox[0]
-    b_lat_min = bbox[1]
-    b_lon_max = bbox[2]
-    b_lat_max = bbox[3]
-
-
-    b_lon = np.linspace(b_lon_min, b_lon_max, num=nx)
-    b_lat = np.linspace(b_lat_min, b_lat_max, num=ny)
-
-    print '-'*50
-    print "lon_range = {} .. {}".format(lon.min(), lon.max())
-    print "lat_range = {} .. {}".format(lat.min(), lat.max())
-    print '-'*50
-    print "b_lon_range = {} .. {}".format(b_lon.min(), b_lon.max())
-    print "b_lat_range = {} .. {}".format(b_lat.min(), b_lat.max())
-    print '-'*50
-    i2d = interp2d(lon, lat, data, fill_value=np.nan)
-
-    return b_lon, b_lat, i2d(b_lon, b_lat)
-
+    pass
 
 
 @tornado.gen.coroutine
@@ -268,53 +229,45 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
                                     [bbox[0], bbox[2]], [bbox[1], bbox[3]])
 
 
+    print "*** BBOX *** = {}".format(bbox)
     wgs84_bbox = [wgs84_bbox_lon[0], wgs_bbox_lat[0],
                   wgs84_bbox_lon[1], wgs_bbox_lat[1]]
+    print "*** WGS84 BBOX *** = {}".format(wgs84_bbox)
+
 
     
-
-    mask = np.zeros_like(w)
-    mask[~np.isnan(w)] = 1
-    w[np.isnan(w)] = np.nanmean(w)
 
     lon = lon[0, :]
     lat = lat[:, 0]
-
-    nx = len(lon)
-    ny = len(lat)
-
-    # Reproject to requested CRS
-    if not crs == 'EPSG:4326':
-        p_lon, p_lat, w = reproject(lon, lat, w, wgs84, proj_to)
-        print "Reprojecting from {} to {}".format('EPSG:4326', crs)
-    else:
-        p_lon, p_lat = lon, lat
+    data_bbox = [lon[0], lat[0], lon[-1], lat[-1]]
+#    print data_bbox
+    lon,lat = np.meshgrid(lon,lat)
 
     # Supersample the data, if requested
     if layer.refine_data:
-         p_lon, p_lat, w = refine_data(p_lon, p_lat, w, layer.refine_data)
-         
+        lon, lat, w = refine_data(lon, lat, w, layer.refine_data)
 
-    # Project onto the bounding box
-    b_lon, b_lat, w = crop_to_bbox(lon=p_lon, lat=p_lat, data=w, bbox=bbox)
+    if None:
+        lon, lat, w = crop_to_bbox(lon, lat, w, wgs84_bbox, nx=50, ny=50)
 
+    # Reproject to requested CRS
+    if not crs == 'EPSG:4326':
+        p_lon, p_lat = pyproj.transform(wgs84, proj_to, lon, lat)
+        minx, miny = pyproj.transform(wgs84, proj_to, lon[0], lat[0])
+        maxx, maxy = pyproj.transform(wgs84, proj_to, lon[-1], lat[-1])
 
-    
-    # Build the figure
+    if layer.crop or layer.crop_inverse:
+        if not layer.shapes:
+            layer.set_shapes()
+        w = crop_data(w, data_bbox, layer.shapes)
+
     fig = plt.figure(frameon=False)
     fig.set_size_inches(width/100, height/100)
     ax = plt.Axes(fig, [0., 0., 1., 1.])
     ax.set_axis_off()
     fig.add_axes(ax)
 
-    if layer.crop or layer.crop_inverse:
-        print "cropping image..."
-        if not layer.shapes:
-            layer.set_shapes()
-        w = crop_data(w, bbox, layer.shapes)
 
-    # Render the data
-    print "rendering"
     function_args = {}
     for key, value in layer.style.render_args.iteritems():
         if 'fn:' in value:
@@ -323,9 +276,16 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
         function_args.update({key: value})
 
     print function_args
+
+    print np.shape(p_lon)
+    print np.shape(p_lat)
+#    lon, lat = np.meshgrid(lon, lat)
     getattr(plt, layer.style.render_function)(
-        w, **function_args) 
-    print "   ...done"
+       p_lon, p_lat, w, **function_args)
+    ax.set_xlim([bbox[0], bbox[2]])
+    ax.set_ylim([bbox[1], bbox[3]])
+    
+#    print "   ...done"
 
     memdata = io.BytesIO()
     plt.savefig(memdata, format='png', dpi=100, transparent=True)

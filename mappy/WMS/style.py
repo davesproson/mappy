@@ -3,7 +3,7 @@ import json
 
 class Style(object):
     
-    def __init__(self, render_function=None, render_args={},
+    def __init__(self, render_function=None, render_args=dict(),
                     mask=None, refine=0, name=None, title=None,
                     abstract=None):
 
@@ -46,10 +46,12 @@ class StyleReader(object):
 
     def _read_style(self, section):
         default_style = Style()
+        default_style.render_args = {}
 
         # much of this could be done via __dict__.update()
         default_style.name = section
         for name, value in self.config.items(section):
+            print "{}: {} = {}".format(section, name, value)
             name = name.lower()
 
             if name == 'title':
@@ -67,10 +69,11 @@ class StyleReader(object):
                 continue
             if name == 'render_args':
                 args = json.loads(self.config.get(section, name).strip())
-                for arg in args:
-                    a = arg.split('=')
-                    if len(a) == 2:
-                        default_style.render_args.update({a[0]: a[1]})
+                if args:
+                    for arg in args:
+                        a = arg.split('=')
+                        if len(a) == 2:
+                            default_style.render_args.update({a[0]: a[1]})
                 continue
             if name == 'render_function':
                 default_style.render_function = value
