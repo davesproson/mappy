@@ -29,6 +29,7 @@ import shapefile
 from mappy.WMS import get_capabilities
 from mappy.WMS import WMSGetMapRequest
 from mappy.WMS.style import StyleReader
+from mappy.Data import DataCollection
 
 TEST_NC_FILE = ''
 
@@ -50,6 +51,10 @@ class Server(object):
         self.contact_electronic_mail_address = 'My@Email.com'
         self.fees = 'None'
         self.access_constraints = 'Commercial and Restricted'
+        self.ip_address = ''
+        self.port = '8888'
+
+server = Server()
 
 styles = StyleReader('styles.ini').styles
 
@@ -105,12 +110,12 @@ def crop_data(data, bbox, shapes):
 
 
 class Layer(object):
-    def __init__(self, data_file_glob=None, crop=False, crop_inverse=False,
+    def __init__(self, data_source=None, crop=False, crop_inverse=False,
                     crop_file=None, colormap=None, refine_data=0,
                     gshhs_resolution=None, var_name=None, 
                     native_projection=None, style=None):
 
-        self.data_file_glob = data_file_glob
+        self.data_source = data_source
         self.crop = crop
         self.var_name = var_name
         self.crop_inverse = crop_inverse
@@ -145,10 +150,17 @@ class Layer(object):
         print "Size: {}".format(sys.getsizeof(self.shapes))
 
 
+data = DataCollection(file_glob=('/share/data/gwrf/fc_northsea/netcdf/'
+                                  'gwrf2016051300/'
+                                  'wrf.ns.24km.2016051300.*.nc'),
+                      lat_var='latitude', lon_var='longitude',
+                      elevation_var='elevation', time_var='time',
+                      data_type='netcdf')
 
-test_layer = Layer(data_file_glob=TEST_NC_FILE, 
-                   crop=False, refine_data=0, gshhs_resolution='i',
-                   var_name=TEST_VAR, style=styles[0])
+
+test_layer = Layer(crop=False, refine_data=0, gshhs_resolution='i',
+                   var_name=TEST_VAR, style=styles[0],
+                   data_source=data)
 
 layers = [test_layer]
 
@@ -216,11 +228,14 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
 
     proj_to = pyproj.Proj('+init={}'.format(crs))
 
-    nc = Dataset(layer.data_file_glob, 'r')
-    w = np.squeeze(nc[layer.var_name][0, :, :])
+    nc = Dataset('/share/data/gwrf/fc_northsea/netcdf/gwrf2016051300/wrf.ns.24km.2016051300.146.nc', 'r')
+#    w = np.squeeze(nc[layer.var_name][0, :, :])
     lon = np.squeeze(nc['longitude'][:])
     lat = np.squeeze(nc['latitude'][:])
     nc.close()
+
+    w = layer.data_source.get_data_layer(var_name=TEST_VAR,
+                   time=datetime.datetime(2016,5,15))
 
     lon, lat = np.meshgrid(lon,lat)
     wgs84 = pyproj.Proj('+init=EPSG:4326')
@@ -315,7 +330,7 @@ class MainHandler(tornado.web.RequestHandler):
             request = self.get_argument('request')
 
         if request == 'GetCapabilities':
-            capes = get_capabilities(layers)
+            capes = get_capabilities(server, layers)
             self.set_header('Content-type', 'text/xml')
             self.write(capes)
             return
