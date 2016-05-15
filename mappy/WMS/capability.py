@@ -93,16 +93,16 @@ def get_capabilities(server, layers):
     for p in valid_projections:
         ET.SubElement(root_layer, 'CRS').text = p
 
-    bbox = ET.SubElement(root_layer, 'EX_GeographicBoundingBox')
-    ET.SubElement(bbox, 'westBoundLongitude').text = '-180'
-    ET.SubElement(bbox, 'eastBoundLongitude').text = '180'
-    ET.SubElement(bbox, 'southBoundLatitude').text = '-90'
-    ET.SubElement(bbox, 'northBoundLatitude').text = '90'
+    # bbox = ET.SubElement(root_layer, 'EX_GeographicBoundingBox')
+    # ET.SubElement(bbox, 'westBoundLongitude').text = '-180'
+    # ET.SubElement(bbox, 'eastBoundLongitude').text = '180'
+    # ET.SubElement(bbox, 'southBoundLatitude').text = '-90'
+    # ET.SubElement(bbox, 'northBoundLatitude').text = '90'
 
-    ET.SubElement(root_layer, 'BoundingBox',
-            CRS='CRS:84', 
-            minx='-90', miny='-180',
-            maxx='90', maxy='180')
+    # ET.SubElement(root_layer, 'BoundingBox',
+    #         CRS='CRS:84', 
+    #         minx='-90', miny='-180',
+    #         maxx='90', maxy='180')
 
 #    ET.SubElement(root_layer, 'BoundingBox',
 #            CRS='EPSG:4326', 
@@ -120,32 +120,39 @@ def get_capabilities(server, layers):
         ET.SubElement(keyword_list, 'Keyword').text = 'Python'
 
         ET.SubElement(layer, 'CRS').text = 'EPSG:4326'
-        ET.SubElement(layer, 'CRS').text = 'CRS:84'
+        ET.SubElement(layer, 'CRS').text = 'EPSG:3857'
+        # ET.SubElement(layer, 'CRS').text = 'CRS:84'
 
-        bbox = ET.SubElement(layer, 'EX_GeographicBoundingBox')
-        ET.SubElement(bbox, 'westBoundLongitude').text = '{}'.format(_layer.bbox[0])
-        ET.SubElement(bbox, 'eastBoundLongitude').text = '{}'.format(_layer.bbox[2])
-        ET.SubElement(bbox, 'southBoundLatitude').text = '{}'.format(_layer.bbox[1])
-        ET.SubElement(bbox, 'northBoundLatitude').text = '{}'.format(_layer.bbox[3])
+        # bbox = ET.SubElement(layer, 'EX_GeographicBoundingBox')
+        # ET.SubElement(bbox, 'westBoundLongitude').text = '{}'.format(_layer.bbox[0])
+        # ET.SubElement(bbox, 'eastBoundLongitude').text = '{}'.format(_layer.bbox[2])
+        # ET.SubElement(bbox, 'southBoundLatitude').text = '{}'.format(_layer.bbox[1])
+        # ET.SubElement(bbox, 'northBoundLatitude').text = '{}'.format(_layer.bbox[3])
 
-        ET.SubElement(layer, 'BoundingBox',
-                   CRS='CRS:84', 
-                   minx='{}'.format(_layer.bbox[1]), 
-                   miny='{}'.format(_layer.bbox[0]),
-                   maxx='{}'.format(_layer.bbox[3]), 
-                   maxy='{}'.format(_layer.bbox[2]))
-
-        ET.SubElement(layer, 'BoundingBox',
-                   CRS='EPSG:4326', 
+        ET.SubElement(layer, 'LatLonBoundingBox',
+ #                  CRS='EPSG:4326', 
                    minx='{}'.format(_layer.bbox[0]), 
                    miny='{}'.format(_layer.bbox[1]),
                    maxx='{}'.format(_layer.bbox[2]), 
                    maxy='{}'.format(_layer.bbox[3]))
 
-        min_time = sorted(_layer.data_source.get_available_times())[0]
-        max_time = sorted(_layer.data_source.get_available_times())[-1]
-        resolution = (sorted(_layer.data_source.get_available_times())[1] - 
-                      sorted(_layer.data_source.get_available_times())[0]).total_seconds()/3600
+        # ET.SubElement(layer, 'BoundingBox',
+        #            CRS='CRS:84', 
+        #            minx='{}'.format(_layer.bbox[0]), 
+        #            miny='{}'.format(_layer.bbox[1]),
+        #            maxx='{}'.format(_layer.bbox[2]), 
+        #            maxy='{}'.format(_layer.bbox[3]))
+
+        if _layer.enable_time:
+            min_time = sorted(_layer.data_source.get_available_times())[0]
+            max_time = sorted(_layer.data_source.get_available_times())[-1]
+
+            if not min_time == max_time:
+                resolution = (sorted(
+                                _layer.data_source.get_available_times())[1] -
+                              sorted(
+                                _layer.data_source.get_available_times())[0]
+                            ).total_seconds()/3600
 
 
         ET.SubElement(layer, 'Dimension', units="ISO8601", default='current', name='time',

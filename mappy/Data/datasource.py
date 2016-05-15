@@ -36,9 +36,10 @@ class DataCollection(object):
                         lon_var=self._lon_var, lat_var=self._lat_var,
                         time_var=self._time_var)
 
-
+        print self._glob
         self._files = [f for f in glob.glob(self._glob)]
-
+        print "** FILES = " + ','.join(self._files)
+ 
         self._time_map = []
         for f in self._files:
             self._time_map += [
@@ -93,6 +94,8 @@ class NetCDFDataReader(DataReader):
                         elevation_level=None):
 
         nc = Dataset(filename, 'r')
+        print "** OPENING {}".format(filename)
+        print "** READING {}".format(var_name)
         if time_level and elevation_level:
             data = nc[var_name][time_level, elevation_level, :, :]
         elif time_level and not elevation_level:
@@ -103,6 +106,7 @@ class NetCDFDataReader(DataReader):
             data = nc[var_name][:, :]
 
         nc.close()
+        print "** DATA = {}".format(data)
         print data
         return squeeze(data)
 

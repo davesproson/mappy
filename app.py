@@ -7,11 +7,12 @@ import tornado.escape
 
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')
+# matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from netCDF4 import Dataset
 
 import datetime
+import glob
 import io
 import os
 import pyproj
@@ -26,12 +27,14 @@ from PIL import Image, ImageDraw
 import shapefile
 #import osgeo
 
+import ConfigParser
+
 from mappy.WMS import get_capabilities
 from mappy.WMS import WMSGetMapRequest
 from mappy.WMS.style import StyleReader
 from mappy.Data import DataCollection
 
-TEST_NC_FILE = ''
+TEST_NC_FILE = 'c:\users\dave\python\wrf.ns.24km.2016050700.*.nc'
 
 TEST_VAR = 'mean_sea_level_pressure'
 
@@ -51,8 +54,23 @@ class Server(object):
         self.contact_electronic_mail_address = 'My@Email.com'
         self.fees = 'None'
         self.access_constraints = 'Commercial and Restricted'
-        self.ip_address = ''
+        self.ip_address = '127.0.0.1'
         self.port = '8888'
+        self.wms_version = '1.3.0'
+        self.projections = dict()
+
+        self.__init_projections()
+
+    def __init_projections(self):
+        config = ConfigParser.SafeConfigParser()
+        config.read('projections.ini')
+        for section in config.sections():
+            if section == 'projections':
+                for key, value in config.items(section):
+                    self.projections.update({key.replace('_',':'): value})
+
+        print self.projections
+
 
 server = Server()
 
@@ -113,7 +131,7 @@ class Layer(object):
     def __init__(self, data_source=None, crop=False, crop_inverse=False,
                     crop_file=None, colormap=None, refine_data=0,
                     gshhs_resolution=None, var_name=None, 
-                    native_projection=None, style=None):
+                    native_projection=None, style=None, enable_time=False):
 
         self.data_source = data_source
         self.crop = crop
@@ -126,6 +144,7 @@ class Layer(object):
         self.native_projection = pyproj.Proj('+init=EPSG:4326')
         self.shapes = []
         self.style = style
+        self.enable_time = enable_time
 
         self.bbox = [-20.358, 39.419, 35.509, 64.749]
 
@@ -150,17 +169,15 @@ class Layer(object):
         print "Size: {}".format(sys.getsizeof(self.shapes))
 
 
-data = DataCollection(file_glob=('/share/data/gwrf/fc_northsea/netcdf/'
-                                  'gwrf2016051300/'
-                                  'wrf.ns.24km.2016051300.*.nc'),
+data = DataCollection(file_glob=TEST_NC_FILE,
                       lat_var='latitude', lon_var='longitude',
                       elevation_var='elevation', time_var='time',
                       data_type='netcdf')
 
 
 test_layer = Layer(crop=False, refine_data=0, gshhs_resolution='i',
-                   var_name=TEST_VAR, style=styles[0],
-                   data_source=data)
+                   var_name=TEST_VAR, style=styles[1],
+                   data_source=data, enable_time=True)
 
 layers = [test_layer]
 
@@ -224,37 +241,32 @@ def crop_to_bbox(lon, lat, data, bbox, nx=None, ny=None):
 
 
 @tornado.gen.coroutine
-def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
+def render(layer, width=100, height=100, request=None):
 
-    proj_to = pyproj.Proj('+init={}'.format(crs))
 
-    nc = Dataset('/share/data/gwrf/fc_northsea/netcdf/gwrf2016051300/wrf.ns.24km.2016051300.146.nc', 'r')
+
+    nc = Dataset(glob.glob(TEST_NC_FILE)[0], 'r')
 #    w = np.squeeze(nc[layer.var_name][0, :, :])
     lon = np.squeeze(nc['longitude'][:])
     lat = np.squeeze(nc['latitude'][:])
     nc.close()
 
     w = layer.data_source.get_data_layer(var_name=TEST_VAR,
-                   time=datetime.datetime(2016,5,15))
+                   time=datetime.datetime(2016,5,7)+datetime.timedelta(hours=100))
 
     lon, lat = np.meshgrid(lon,lat)
-    wgs84 = pyproj.Proj('+init=EPSG:4326')
 
-    wgs84_bbox_lon, wgs_bbox_lat = pyproj.transform(proj_to, wgs84, 
-                                    [bbox[0], bbox[2]], [bbox[1], bbox[3]])
+    bbox = request.bbox
+    wgs84_bbox = request.wgs84_bbox
+    crs = request.crs
 
-
-    print "*** BBOX *** = {}".format(bbox)
-    wgs84_bbox = [wgs84_bbox_lon[0], wgs_bbox_lat[0],
-                  wgs84_bbox_lon[1], wgs_bbox_lat[1]]
-    print "*** WGS84 BBOX *** = {}".format(wgs84_bbox)
-
-
-    
+    proj_to = pyproj.Proj(server.projections[crs.lower()])
+    wgs84 = pyproj.Proj(server.projections['epsg:4326'])
 
     lon = lon[0, :]
     lat = lat[:, 0]
     data_bbox = [lon[0], lat[0], lon[-1], lat[-1]]
+
 #    print data_bbox
     lon,lat = np.meshgrid(lon,lat)
 
@@ -270,6 +282,11 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
         p_lon, p_lat = pyproj.transform(wgs84, proj_to, lon, lat)
         minx, miny = pyproj.transform(wgs84, proj_to, lon[0], lat[0])
         maxx, maxy = pyproj.transform(wgs84, proj_to, lon[-1], lat[-1])
+    else:
+        p_lon, p_lat = lon[0, :], lat[:, 0]
+        minx, miny = lon[0], lat[0]
+        maxx, maxy = lon[-1], lat[-1]
+        p_lon, p_lat = np.meshgrid(p_lon, p_lat)
 
     if layer.crop or layer.crop_inverse:
         if not layer.shapes:
@@ -292,13 +309,18 @@ def render(layer, width=100, height=100, bbox=None, crs='EPSG:4326'):
 
     print function_args
 
-    print np.shape(p_lon)
-    print np.shape(p_lat)
+
 #    lon, lat = np.meshgrid(lon, lat)
     getattr(plt, layer.style.render_function)(
        p_lon, p_lat, w, **function_args)
-    ax.set_xlim([bbox[0], bbox[2]])
-    ax.set_ylim([bbox[1], bbox[3]])
+
+
+    if '+proj=longlat' in server.projections[crs.lower()]:
+        ax.set_xlim([bbox[0], bbox[2]])
+        ax.set_ylim([bbox[1], bbox[3]])
+    else:
+        ax.set_xlim([bbox[1], bbox[3]])
+        ax.set_ylim([bbox[0], bbox[2]])
     
 #    print "   ...done"
 
@@ -339,10 +361,9 @@ class MainHandler(tornado.web.RequestHandler):
             map_request = WMSGetMapRequest(**self.request.query_arguments)
 
             image = yield render(test_layer, 
-                             bbox=map_request.bbox, 
                                width=map_request.width,
                                height=map_request.height, 
-                               crs=map_request.crs)
+                               request=map_request)
 
             self.set_header('Content-type', 'image/png')
             self.write(image)
