@@ -8,11 +8,11 @@ def get_capabilities(server, layers):
     root_args = {'xmlns':"http://www.opengis.net/wms",
                  'xmlns:xlink':"http://www.w3.org/1999/xlink",
                  'xmlns:xsi': "http://www.w3.org/2001/XMLSchema-instance", 
-                 'xsi:schemaLocation': ('http://www.opengis.net/wms '
-                                        'http://81.171.155.52:80/geoserver/'
-                                        'schemas/wms/1.3.0/'
-                                        'capabilities_1_3_0.xsd'),
-                 'version':'1.3.0', 'updateSequence':'1100'}
+                 'xsi:schemaLocation': ('http://www.opengis.net/wms '),
+#                                        'http://81.171.155.52:80/geoserver/'
+#                                        'schemas/wms/1.3.0/'
+#                                        'capabilities_1_3_0.xsd'),
+                 'version':'1.3.0'}#, 'updateSequence':'1100'}
 
     root = ET.Element('WMS_Capabilities', **root_args)
 
@@ -89,20 +89,20 @@ def get_capabilities(server, layers):
     ET.SubElement(root_layer, 'Title')
     ET.SubElement(root_layer, 'Abstract')
 
-    valid_projections = ['EPSG:4326', 'EPSG:3857']
+    valid_projections = ['EPSG:4326', 'EPSG:3857', 'CRS:84']
     for p in valid_projections:
         ET.SubElement(root_layer, 'CRS').text = p
 
-    # bbox = ET.SubElement(root_layer, 'EX_GeographicBoundingBox')
-    # ET.SubElement(bbox, 'westBoundLongitude').text = '-180'
-    # ET.SubElement(bbox, 'eastBoundLongitude').text = '180'
-    # ET.SubElement(bbox, 'southBoundLatitude').text = '-90'
-    # ET.SubElement(bbox, 'northBoundLatitude').text = '90'
+    bbox = ET.SubElement(root_layer, 'EX_GeographicBoundingBox')
+    ET.SubElement(bbox, 'westBoundLongitude').text = '-180'
+    ET.SubElement(bbox, 'eastBoundLongitude').text = '180'
+    ET.SubElement(bbox, 'southBoundLatitude').text = '-90'
+    ET.SubElement(bbox, 'northBoundLatitude').text = '90'
 
-    # ET.SubElement(root_layer, 'BoundingBox',
-    #         CRS='CRS:84', 
-    #         minx='-90', miny='-180',
-    #         maxx='90', maxy='180')
+    ET.SubElement(root_layer, 'BoundingBox',
+            CRS='CRS:84', 
+            minx='-180', miny='-90',
+            maxx='180', maxy='90')
 
 #    ET.SubElement(root_layer, 'BoundingBox',
 #            CRS='EPSG:4326', 
@@ -121,43 +121,49 @@ def get_capabilities(server, layers):
 
         ET.SubElement(layer, 'CRS').text = 'EPSG:4326'
         ET.SubElement(layer, 'CRS').text = 'EPSG:3857'
-        # ET.SubElement(layer, 'CRS').text = 'CRS:84'
+        ET.SubElement(layer, 'CRS').text = 'CRS:84'
 
-        # bbox = ET.SubElement(layer, 'EX_GeographicBoundingBox')
-        # ET.SubElement(bbox, 'westBoundLongitude').text = '{}'.format(_layer.bbox[0])
-        # ET.SubElement(bbox, 'eastBoundLongitude').text = '{}'.format(_layer.bbox[2])
-        # ET.SubElement(bbox, 'southBoundLatitude').text = '{}'.format(_layer.bbox[1])
-        # ET.SubElement(bbox, 'northBoundLatitude').text = '{}'.format(_layer.bbox[3])
+        bbox = ET.SubElement(layer, 'EX_GeographicBoundingBox')
+        ET.SubElement(bbox, 'westBoundLongitude').text = '{}'.format(_layer.bbox[0])
+        ET.SubElement(bbox, 'eastBoundLongitude').text = '{}'.format(_layer.bbox[2])
+        ET.SubElement(bbox, 'southBoundLatitude').text = '{}'.format(_layer.bbox[1])
+        ET.SubElement(bbox, 'northBoundLatitude').text = '{}'.format(_layer.bbox[3])
 
-        ET.SubElement(layer, 'LatLonBoundingBox',
- #                  CRS='EPSG:4326', 
+#        ET.SubElement(layer, 'LatLonBoundingBox',
+#                   minx='{}'.format(_layer.bbox[0]), 
+#                   miny='{}'.format(_layer.bbox[1]),
+#                   maxx='{}'.format(_layer.bbox[2]), 
+#                   maxy='{}'.format(_layer.bbox[3]))
+
+        ET.SubElement(layer, 'BoundingBox',
+                   CRS='CRS:84', 
                    minx='{}'.format(_layer.bbox[0]), 
                    miny='{}'.format(_layer.bbox[1]),
                    maxx='{}'.format(_layer.bbox[2]), 
                    maxy='{}'.format(_layer.bbox[3]))
 
-        # ET.SubElement(layer, 'BoundingBox',
-        #            CRS='CRS:84', 
-        #            minx='{}'.format(_layer.bbox[0]), 
-        #            miny='{}'.format(_layer.bbox[1]),
-        #            maxx='{}'.format(_layer.bbox[2]), 
-        #            maxy='{}'.format(_layer.bbox[3]))
+        ET.SubElement(layer, 'BoundingBox',
+                   CRS='EPSG:4326', 
+                   minx='{}'.format(_layer.bbox[1]), 
+                   miny='{}'.format(_layer.bbox[0]),
+                   maxx='{}'.format(_layer.bbox[3]), 
+                   maxy='{}'.format(_layer.bbox[2]))
 
-        if _layer.enable_time:
-            min_time = sorted(_layer.data_source.get_available_times())[0]
-            max_time = sorted(_layer.data_source.get_available_times())[-1]
+#        if _layer.enable_time:
+#            min_time = sorted(_layer.data_source.get_available_times())[0]
+#            max_time = sorted(_layer.data_source.get_available_times())[-1]
+#
+#            if not min_time == max_time:
+#                resolution = (sorted(
+#                                _layer.data_source.get_available_times())[1] -
+#                              sorted(
+#                                _layer.data_source.get_available_times())[0]
+#                            ).total_seconds()/3600
 
-            if not min_time == max_time:
-                resolution = (sorted(
-                                _layer.data_source.get_available_times())[1] -
-                              sorted(
-                                _layer.data_source.get_available_times())[0]
-                            ).total_seconds()/3600
 
-
-        ET.SubElement(layer, 'Dimension', units="ISO8601", default='current', name='time',
-                        ).text = ','.join([i.strftime('%Y-%m-%dT%H:%M:%S.000Z') for i in 
-                                         sorted(_layer.data_source.get_available_times())])
+#        ET.SubElement(layer, 'Dimension', units="ISO8601", default='current', name='time',
+#                        ).text = ','.join([i.strftime('%Y-%m-%dT%H:%M:%S.000Z') for i in 
+#                                         sorted(_layer.data_source.get_available_times())])
 
         style = ET.SubElement(layer, 'Style')
         ET.SubElement(style, 'Name').text = 'generic'

@@ -7,7 +7,7 @@ import tornado.escape
 
 import numpy as np
 import matplotlib
-# matplotlib.use('Agg')
+matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from netCDF4 import Dataset
 
@@ -34,11 +34,11 @@ from mappy.WMS import WMSGetMapRequest
 from mappy.WMS.style import StyleReader
 from mappy.Data import DataCollection
 
-TEST_NC_FILE = 'c:\users\dave\python\wrf.ns.24km.2016050700.*.nc'
+TEST_NC_FILE = '/share/data/gwrf/fc_northsea/netcdf/gwrf2016070600/wrf.ns.24km.*'
 
 TEST_VAR = 'mean_sea_level_pressure'
 
-TEST_SHAPEFILE = ''
+TEST_SHAPEFILE = '/share/data/GEOG/gshhs/GSHHS_shp/i/GSHHS_i_L1.shp'
 
 class Server(object):
     def __init__(self):
@@ -54,7 +54,7 @@ class Server(object):
         self.contact_electronic_mail_address = 'My@Email.com'
         self.fees = 'None'
         self.access_constraints = 'Commercial and Restricted'
-        self.ip_address = '127.0.0.1'
+        self.ip_address = 'fgwfcluster3'
         self.port = '8888'
         self.wms_version = '1.3.0'
         self.projections = dict()
@@ -86,11 +86,11 @@ def bboxes_intersect(b1, b2):
     return (intervals_intersect((b1[0], b1[2]), (b2[0], b2[2])) and
             intervals_intersect((b1[1], b1[3]), (b2[1], b2[3])))
 
-def crop_data(data, bbox, shapes):
+def crop_data(data, bbox, wgs84_bbox, proj_to, shapes):
     xdist = bbox[2] - bbox[0]
     ydist = bbox[3] - bbox[1]
 
-    print xdist, ydist
+    print "X_d = {}, Y_d = {}".format(xdist, ydist)
 
     # Image width & height
     iwidth = np.shape(data)[1]
@@ -99,24 +99,39 @@ def crop_data(data, bbox, shapes):
     yratio = iheight/ydist
     pixels = []
 
+    print "iwidth = {}".format(iwidth)
+    print "iheight = {}".format(iheight)
+    print "xratio = {}".format(xratio)
+    print "yratio = {}".format(yratio)
+
     cnt = 0
     img = Image.new("RGB", (iwidth, iheight), "white")
     draw = ImageDraw.Draw(img)
 
-    for shape in shapes:
-        slon = [shape.bbox[0], shape.bbox[2]]
-        slat = [shape.bbox[1], shape.bbox[3]]
+    wgs84 = pyproj.Proj(server.projections['epsg:4326'])
 
-        rlon, rlat = slon, slat 
+    for shape in shapes:
+        slon = [shape.bbox[0], 
+                shape.bbox[2]]
+
+
+        slat = [shape.bbox[1], 
+                shape.bbox[3]]
+
+        rlon, rlat = slon, slat
         r_bbox = [rlon[0], rlat[0], rlon[1], rlat[1]]
 
-        if not bboxes_intersect(r_bbox, bbox):
+        if not bboxes_intersect(r_bbox, wgs84_bbox):
             continue
 
+
         pixels = []
-        for x,y in shape.points:
+        for x_p, y_p in shape.points:
+            x, y = pyproj.transform(wgs84, proj_to, x_p, y_p)
+
             px = int(iwidth - ((bbox[2] - x) * xratio))
             py = int((bbox[3] - y) * yratio)
+
             pixels.append((px,py))
 
         draw.polygon(pixels, outline="rgb(0,0,0)", fill="rgb(0,0,0)")
@@ -152,7 +167,7 @@ class Layer(object):
             raise ValueError('crop and crop_inverse cannot both be True')
 
     def set_shapes(self):
-        nc = Dataset(self.data_file_glob)
+        nc = Dataset(glob.glob(TEST_NC_FILE)[0])
         lat = nc['latitude'][:]
         lon = nc['longitude'][:]
         nc.close()
@@ -174,8 +189,13 @@ data = DataCollection(file_glob=TEST_NC_FILE,
                       elevation_var='elevation', time_var='time',
                       data_type='netcdf')
 
+#data = DataCollection(file_glob=TEST_NC_FILE,
+#                      lat_var='latitude', lon_var='longitude',
+#                      elevation_var='depth', time_var='time',
+#                      data_type='netcdf')
 
-test_layer = Layer(crop=False, refine_data=0, gshhs_resolution='i',
+
+test_layer = Layer(crop=True, refine_data=0, gshhs_resolution='i',
                    var_name=TEST_VAR, style=styles[1],
                    data_source=data, enable_time=True)
 
@@ -252,8 +272,10 @@ def render(layer, width=100, height=100, request=None):
     nc.close()
 
     w = layer.data_source.get_data_layer(var_name=TEST_VAR,
-                   time=datetime.datetime(2016,5,7)+datetime.timedelta(hours=100))
+                   time=datetime.datetime(2016,7,4)+datetime.timedelta(hours=100))
 
+    
+    print "***w = {}".format(np.shape(w))
     lon, lat = np.meshgrid(lon,lat)
 
     bbox = request.bbox
@@ -291,7 +313,8 @@ def render(layer, width=100, height=100, request=None):
     if layer.crop or layer.crop_inverse:
         if not layer.shapes:
             layer.set_shapes()
-        w = crop_data(w, data_bbox, layer.shapes)
+#        w = crop_data(w, data_bbox, layer.shapes)
+        w = crop_data(w, bbox, wgs84_bbox, proj_to, layer.shapes) 
 
     fig = plt.figure(frameon=False)
     fig.set_size_inches(width/100, height/100)
@@ -299,7 +322,7 @@ def render(layer, width=100, height=100, request=None):
     ax.set_axis_off()
     fig.add_axes(ax)
 
-
+    print "***w = {}".format(np.shape(w))
     function_args = {}
     for key, value in layer.style.render_args.iteritems():
         if 'fn:' in value:
@@ -326,7 +349,9 @@ def render(layer, width=100, height=100, request=None):
 
     memdata = io.BytesIO()
     plt.savefig(memdata, format='png', dpi=100, transparent=True)
+    plt.close()
     image = memdata.getvalue()
+    memdata.close()
 
     print "request complete"
     
