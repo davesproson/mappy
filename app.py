@@ -20,6 +20,8 @@ import sys
 
 from scipy import interpolate
 from scipy.interpolate import interp2d
+from scipy import ndimage as nd
+
 
 from mpl_toolkits.basemap import Basemap 
 
@@ -86,20 +88,29 @@ def bboxes_intersect(b1, b2):
     return (intervals_intersect((b1[0], b1[2]), (b2[0], b2[2])) and
             intervals_intersect((b1[1], b1[3]), (b2[1], b2[3])))
 
-def mask_data(lon, lat, data, shapes, wgs84, proj_to, layer):
+def mask_data(lon, lat, data, proj, shapes, layer):
 
-    if layer.mask is not None:
-        print "USING SAVED MASK"
-        return np.ma.masked_where(np.logical_or(layer.mask>0, np.isnan(data)), data)
+#    if layer.mask is not None:
+#        print "USING SAVED MASK"
+#        return np.ma.masked_where(np.logical_or(layer.mask>0, np.isnan(data)), data)
 
     # Size of the domain in the requested CRS
+    latlon = pyproj.Proj('+proj=latlong +a=6378137 +b=6378137')
+    lon, lat = pyproj.transform(proj, latlon, lon, lat)
+
+
+    lon = lon[0, :]
+    lat = lat[:, 0]
+
+    print "lon = {}".format(lon)
+    print('lat = {}'.format(lat))
+
     xdist = lon[-1] - lon[0] #bbox[2] - bbox[0]
     ydist = lat[-1] - lat[0] #bbox[3] - bbox[1]
 
     bbox = [lon[0], lat[0], lon[-1], lat[-1]]
-    wgs84 = pyproj.Proj('+proj=latlong +a=6378137 +b=6378137')
+    print(bbox)
 
-    print "X_d = {}, Y_d = {}".format(xdist, ydist)
 
     # Image width & height
     iwidth = np.shape(data)[1]
@@ -108,14 +119,6 @@ def mask_data(lon, lat, data, shapes, wgs84, proj_to, layer):
     yratio = iheight/ydist
     pixels = []
 
-#    print "WGS84_bbox = {}".format(wgs84_bbox)
-    print "REQST_bbox = {}".format(bbox)
-
-    print "iwidth = {}".format(iwidth)
-    print "iheight = {}".format(iheight)
-    print "xratio = {}".format(xratio)
-    print "yratio = {}".format(yratio)
-
     img = Image.new("RGB", (iwidth, iheight), "white")
     draw = ImageDraw.Draw(img)
 
@@ -123,31 +126,40 @@ def mask_data(lon, lat, data, shapes, wgs84, proj_to, layer):
         temp = np.abs(array - val)
         return temp.tolist().index(np.min(temp))
 
+    print('shapes = {}'.format(layer.shapes))
     for shape in shapes:
 
-        shape_bbox = shape.bbox
-        shape_bbox[0], shape_bbox[1] = pyproj.transform(wgs84, proj_to, shape.bbox[0], shape.bbox[1])
-        shape_bbox[2], shape_bbox[3] = pyproj.transform(wgs84, proj_to, shape.bbox[2], shape.bbox[3])
+#        shape_bbox = shape.bbox
+#        shape_bbox[0], shape_bbox[1] = pyproj.transform(wgs84, proj_to, shape.bbox[0], shape.bbox[1])
+#        shape_bbox[2], shape_bbox[3] = pyproj.transform(wgs84, proj_to, shape.bbox[2], shape.bbox[3])
 
-#        if not bboxes_intersect(shape_bbox, bbox):
+        if not bboxes_intersect(shape.bbox, bbox):
 #            print "Ignoring shape with bbox = {}".format(shape.bbox)
-#            continue
+            continue
+            pass
+
+        print shape.bbox
 
 
         pixels = []
-        for x_p, y_p in shape.points:
-            x, y = pyproj.transform(wgs84, proj_to, x_p, y_p)
+        for x, y in shape.points:
+#            x, y = pyproj.transform(wgs84, proj_to, x_p, y_p)
 
 #            px = int(iwidth - ((bbox[2] - x) * xratio))
-            px = nearest(lon, x)
+            px = int(iwidth - ((lon[-1] - x) * xratio))
+#            px = nearest(lon, x)
 #            py = int((bbox[3] - y) * yratio)
-            py = nearest(lat, y)
+            py = int((lat[-1] - y) * yratio)
+#            py = nearest(lat, y)
 
             pixels.append((px,py))
 
         draw.polygon(pixels, outline="rgb(0,0,0)", fill="rgb(0,0,0)")
 
-    mdata = np.mean(PIL2np(img), axis=2).astype(int)
+    mdata = np.flipud(np.mean(PIL2np(img), axis=2).astype(int))
+
+#    plt.pcolor(mdata)
+#    plt.show()
 
     layer.mask = mdata
     data = np.ma.masked_where(np.logical_or(mdata>0, np.isnan(data)), data)
@@ -205,8 +217,8 @@ data = DataCollection(file_glob=TEST_NC_FILE,
                       data_type='netcdf')
 
 
-test_layer = Layer(crop=True, refine_data=16, gshhs_resolution='i',
-                   var_name=TEST_VAR, style=styles[1],
+test_layer = Layer(crop=False, refine_data=0, gshhs_resolution='i',
+                   var_name=TEST_VAR, style=styles[2],
                    data_source=data, enable_time=True)
 
 layers = [test_layer]
@@ -239,8 +251,58 @@ def refine_data(lon, lat, f, refine):
     return lon_hi, lat_hi, f
 
 
-def crop_to_bbox(lon, lat, data, bbox, nx=None, ny=None):
-    pass
+def crop_to_bbox(lon, lat, data, bbox, nx=200, ny=200):
+#    lati = np.where(np.logical_and(lat>=bbox[0]-1, lat<=bbox[2]+1))[0]
+#    loni = np.where(np.logical_and(lon>=bbox[1]-1, lon<=bbox[3]+1))[0]
+#    lon = lon[loni[0]:loni[-1]] 
+#    lat = lat[lati[0]:lati[-1]] 
+#    data = data[lati[0]:lati[-1], loni[0]:loni[-1]]
+#    return lon, lat, data
+    def __fill(data):
+        invalid = np.isnan(data)
+
+        ind = nd.distance_transform_edt(invalid,
+                                        return_distances=False,
+                                        return_indices=True)
+
+        return data[tuple(ind)]
+
+
+    lat_min = bbox[0]
+    lat_max = bbox[2]
+    lon_min = bbox[1]
+    lon_max = bbox[3]
+
+    a = np.array(data.mask).astype(int)
+    print a
+    a[:, 0] = 1
+    a[-1, :] = 1
+    print(a)
+
+    data = __fill(data)
+#    data[np.isnan(data)] = 9e99
+
+
+
+    dlat = (lat_max - lat_min) / ny
+    dlon = (lon_max - lon_min) / nx
+
+    lat_hi = np.arange(lat_min, lat_max + dlat, dlat)
+    lon_hi = np.arange(lon_min, lon_max + dlon, dlon)
+
+    ipol = interp2d(lon, lat, data)
+    apol = interp2d(lon, lat, a)
+
+    data_hi = ipol(lon_hi, lat_hi)
+    mask_hi = apol(lon_hi, lat_hi)
+
+    data_hi = np.ma.masked_where(mask_hi>.2, data_hi)
+
+    return lon_hi, lat_hi, data_hi
+    
+
+
+
 
 
 @tornado.gen.coroutine
@@ -259,7 +321,7 @@ def render(layer, width=100, height=100, request=None):
 
     
     print "*** shape(data) = {}".format(np.shape(w))
-    lon, lat = np.meshgrid(lon,lat)
+#    lon, lat = np.meshgrid(lon,lat)
 
     # Save out some useful stuff from the request
     bbox = request.bbox                 # BBOX in the requested CRS
@@ -269,22 +331,27 @@ def render(layer, width=100, height=100, request=None):
     # Initialise pyproj projections for the requested and WGS84 CRS's
     proj_to = pyproj.Proj(server.projections[crs.lower()])
     wgs84 = pyproj.Proj(server.projections['epsg:4326'])
+    latlon = pyproj.Proj('+proj=latlong +a=6378137 +b=6378137')
+
+    latlon_bbox = [0, 0, 0, 0]
+    latlon_bbox[0], latlon_bbox[2] = pyproj.transform(wgs84, latlon, wgs84_bbox[0], wgs84_bbox[2])
+    latlon_bbox[1], latlon_bbox[3] = pyproj.transform(wgs84, latlon, wgs84_bbox[1], wgs84_bbox[3])
 
     # Build a bounding box for the data (assume this is in WGS84)
-    lon = lon[0, :]
-    lat = lat[:, 0]
+#    lon = lon[0, :]
+#    lat = lat[:, 0]
     data_bbox = [lon[0], lat[0], lon[-1], lat[-1]]
 
-    lon,lat = np.meshgrid(lon,lat)
+#    lon,lat = np.meshgrid(lon,lat)
 
     # Supersample the data, if requested
-    if layer.refine_data:
-        lon, lat, w = refine_data(lon, lat, w, layer.refine_data)
+#    if layer.refine_data:
+#        lon, lat, w = refine_data(lon, lat, w, layer.refine_data)
 
-    if None:
-        lon, lat, w = crop_to_bbox(lon, lat, w, wgs84_bbox, nx=50, ny=50)
+#    if True:
+#        lon, lat, w = crop_to_bbox(lon, lat, w, wgs84_bbox, nx=50, ny=50)
 
-    if layer.crop or layer.crop_inverse:
+    if True: #layer.crop or layer.crop_inverse:
         if not layer.shapes:
             layer.set_shapes()
 
@@ -293,20 +360,29 @@ def render(layer, width=100, height=100, request=None):
 
     # Reproject to requested CRS
     if crs != 'EPSG:4326':
+        lon, lat = np.meshgrid(lon, lat)
         p_lon, p_lat = pyproj.transform(wgs84, proj_to, lon, lat)
         minx, miny = pyproj.transform(wgs84, proj_to, lon[0], lat[0])
         maxx, maxy = pyproj.transform(wgs84, proj_to, lon[-1], lat[-1])
     else:
-        p_lon, p_lat = lon[0, :], lat[:, 0]
+#        p_lon, p_lat = lon[0, :], lat[:, 0]
         minx, miny = lon[0], lat[0]
         maxx, maxy = lon[-1], lat[-1]
-        p_lon, p_lat = np.meshgrid(p_lon, p_lat)
+        p_lon, p_lat = np.meshgrid(lon, lat)
 
-    w = mask_data(p_lon[0, :], p_lat[:, 0], w, layer.shapes, wgs84, proj_to, layer)     
+#    if layer.crop:
+#        w = mask_data(p_lon[0, :], p_lat[:, 0], w, layer.shapes, wgs84, proj_to, layer)     
+
+    if True:
+        lon, lat, w = crop_to_bbox(p_lon[0, :], p_lat[:, 0], w, bbox, nx=150, ny=150)
+        p_lon, p_lat = np.meshgrid(lon, lat)
+
+    if True: #layer.crop:
+        w = mask_data(p_lon, p_lat, w, proj_to, layer.shapes, layer)     
 
 
     fig = plt.figure(frameon=False)
-    fig.set_size_inches(width/100, height/100)
+#    fig.set_size_inches(width/100, height/100)
     ax = plt.Axes(fig, [0., 0., 1., 1.])
     ax.set_axis_off()
     fig.add_axes(ax)
@@ -323,10 +399,10 @@ def render(layer, width=100, height=100, request=None):
 
 
 #    lon, lat = np.meshgrid(lon, lat)
-#    getattr(plt, layer.style.render_function)(
-#       p_lon, p_lat, w, **function_args)
+    getattr(plt, layer.style.render_function)(
+       p_lon, p_lat, w, **function_args)
 
-    plt.pcolormesh(p_lon, p_lat, w)
+#    plt.pcolormesh(p_lon, p_lat, w)
 
 
     if '+proj=longlat' in server.projections[crs.lower()]:
