@@ -36,9 +36,10 @@ from mappy.WMS import WMSGetMapRequest
 from mappy.WMS.style import StyleReader
 from mappy.Data import DataCollection
 
-TEST_NC_FILE = '/share/data/gwrf/fc_northsea/netcdf/gwrf2016070600/wrf.ns.24km.*'
+TEST_NC_FILE = '/share/data/gwrf/fc_northsea/netcdf/gwrf2016071100/wrf.ns.24km.*'
 
 TEST_VAR = 'mean_sea_level_pressure'
+TEST_VAR = 'water_temperature'
 
 TEST_SHAPEFILE = '/share/data/GEOG/gshhs/GSHHS_shp/i/GSHHS_i_L1.shp'
 
@@ -96,20 +97,24 @@ def mask_data(lon, lat, data, proj, shapes, layer):
 
     # Size of the domain in the requested CRS
     latlon = pyproj.Proj('+proj=latlong +a=6378137 +b=6378137')
-    lon, lat = pyproj.transform(proj, latlon, lon, lat)
+    llon, llat = pyproj.transform(proj, latlon, lon, lat)
 
 
     lon = lon[0, :]
     lat = lat[:, 0]
+    llon = llon[0, :]
+    llat = llat[:, 0]
 
-    print "lon = {}".format(lon)
-    print('lat = {}'.format(lat))
+#    print "lon = {}".format(lon)
+#    print('lat = {}'.format(lat))
+#    print "llon = {}".format(llon)
+#    print('llat = {}'.format(llat))
 
     xdist = lon[-1] - lon[0] #bbox[2] - bbox[0]
     ydist = lat[-1] - lat[0] #bbox[3] - bbox[1]
 
-    bbox = [lon[0], lat[0], lon[-1], lat[-1]]
-    print(bbox)
+    bbox = [llon[0], llat[0], llon[-1], llat[-1]]
+#    print(bbox)
 
 
     # Image width & height
@@ -126,24 +131,14 @@ def mask_data(lon, lat, data, proj, shapes, layer):
         temp = np.abs(array - val)
         return temp.tolist().index(np.min(temp))
 
-    print('shapes = {}'.format(layer.shapes))
     for shape in shapes:
-
-#        shape_bbox = shape.bbox
-#        shape_bbox[0], shape_bbox[1] = pyproj.transform(wgs84, proj_to, shape.bbox[0], shape.bbox[1])
-#        shape_bbox[2], shape_bbox[3] = pyproj.transform(wgs84, proj_to, shape.bbox[2], shape.bbox[3])
-
         if not bboxes_intersect(shape.bbox, bbox):
-#            print "Ignoring shape with bbox = {}".format(shape.bbox)
             continue
-            pass
-
-        print shape.bbox
 
 
         pixels = []
-        for x, y in shape.points:
-#            x, y = pyproj.transform(wgs84, proj_to, x_p, y_p)
+        for p_x, p_y in shape.points:
+            x, y = pyproj.transform(latlon, proj, p_x, p_y)
 
 #            px = int(iwidth - ((bbox[2] - x) * xratio))
             px = int(iwidth - ((lon[-1] - x) * xratio))
@@ -317,7 +312,7 @@ def render(layer, width=100, height=100, request=None):
 
     # Get the data from the layer's data_source
     w = layer.data_source.get_data_layer(var_name=TEST_VAR,
-                   time=datetime.datetime(2016,7,4)+datetime.timedelta(hours=100))
+                   time=datetime.datetime(2016,7,11)+datetime.timedelta(hours=100))
 
     
     print "*** shape(data) = {}".format(np.shape(w))
@@ -374,7 +369,7 @@ def render(layer, width=100, height=100, request=None):
 #        w = mask_data(p_lon[0, :], p_lat[:, 0], w, layer.shapes, wgs84, proj_to, layer)     
 
     if True:
-        lon, lat, w = crop_to_bbox(p_lon[0, :], p_lat[:, 0], w, bbox, nx=150, ny=150)
+        lon, lat, w = crop_to_bbox(p_lon[0, :], p_lat[:, 0], w, bbox, nx=400, ny=200)
         p_lon, p_lat = np.meshgrid(lon, lat)
 
     if True: #layer.crop:
